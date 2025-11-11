@@ -25,7 +25,6 @@ def get_weather(위도: float, 경도: float) -> str:
 
 async def main():
     
-    # 두 MCP 서버를 모두 컨텍스트 매니저로 사용
     async with MCPServerStdio(
         name="Playwright MCP",
         params={
@@ -62,25 +61,69 @@ async def main():
 
                 response = await Runner.run(agent, input=messages)
                 # RunResult 객체에서 텍스트 추출
-                if hasattr(response, 'text') and response.text:
-                    full = response.text
-                elif hasattr(response, 'content') and response.content:
-                    full = response.content
-                elif hasattr(response, 'output'):
-                    # output 리스트에서 텍스트 타입 항목 찾기
+                full = None
+                
+                # 1. final_output 속성 확인 (가장 우선)
+                if hasattr(response, 'final_output') and response.final_output:
+                    if isinstance(response.final_output, str):
+                        full = response.final_output
+                    elif hasattr(response.final_output, 'content'):
+                        full = response.final_output.content
+                    elif hasattr(response.final_output, 'text'):
+                        full = response.final_output.text
+                
+                # 2. final_output_as 메서드 사용
+                if not full and hasattr(response, 'final_output_as'):
+                    try:
+                        full = response.final_output_as(str)
+                    except:
+                        pass
+                
+                # 3. new_items에서 텍스트 추출
+                if not full and hasattr(response, 'new_items') and response.new_items:
                     text_items = []
-                    for item in response.output:
-                        if hasattr(item, 'content') and item.content:
-                            text_items.append(str(item.content))
+                    for item in response.new_items:
+                        # item이 텍스트 타입인 경우
+                        if hasattr(item, 'type') and item.type == 'text':
+                            if hasattr(item, 'content'):
+                                text_items.append(str(item.content))
+                            elif hasattr(item, 'text'):
+                                text_items.append(str(item.text))
+                        # item이 문자열인 경우
                         elif isinstance(item, str):
                             text_items.append(item)
+                        # item에 content 속성이 있는 경우
+                        elif hasattr(item, 'content') and item.content:
+                            text_items.append(str(item.content))
+                        # item에 text 속성이 있는 경우
                         elif hasattr(item, 'text') and item.text:
                             text_items.append(str(item.text))
-                    full = ' '.join(text_items) if text_items else str(response)
-                elif hasattr(response, 'message') and hasattr(response.message, 'content'):
-                    full = response.message.content
-                else:
-                    full = str(response)
+                    
+                    if text_items:
+                        full = '\n'.join(text_items) if len(text_items) > 1 else text_items[0]
+                
+                # 4. raw_responses에서 텍스트 추출
+                if not full and hasattr(response, 'raw_responses') and response.raw_responses:
+                    for raw_resp in response.raw_responses:
+                        if hasattr(raw_resp, 'output_text') and raw_resp.output_text:
+                            full = raw_resp.output_text
+                            break
+                        elif hasattr(raw_resp, 'text') and raw_resp.text:
+                            full = raw_resp.text
+                            break
+                
+                # 5. 최종 폴백: 디버깅 정보 출력
+                if not full:
+                    print("\n⚠️ 응답을 추출할 수 없습니다.")
+                    # 디버깅을 위해 일부 정보 출력
+                    if hasattr(response, 'new_items'):
+                        print(f"new_items 수: {len(response.new_items) if response.new_items else 0}")
+                    if hasattr(response, 'raw_responses'):
+                        print(f"raw_responses 수: {len(response.raw_responses) if response.raw_responses else 0}")
+                    if hasattr(response, 'final_output'):
+                        print(f"final_output 타입: {type(response.final_output)}")
+                    continue
+                
                 print(full)
 
                 messages.append({"role": "assistant", "content": full})
